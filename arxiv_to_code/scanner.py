@@ -13,7 +13,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 DEFAULT_CATEGORIES = ["cs.AI", "cs.CR", "cs.LG", "cs.SE"]
 DEFAULT_MAX_RESULTS = 100
 
