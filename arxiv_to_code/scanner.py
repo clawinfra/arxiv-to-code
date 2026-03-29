@@ -141,15 +141,41 @@ def fetch_recent(
         client = httpx.Client(timeout=30)
         should_close = True
 
-    try:
-        resp = client.get(ARXIV_API, params=params)
-        resp.raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error("arXiv API request failed: %s", e)
+    # Retry with exponential backoff — arXiv returns 429 during peak hours
+    import time as _time
+    max_retries = 4
+    base_delay = 15  # seconds
+    resp = None
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            resp = client.get(ARXIV_API, params=params)
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", base_delay * (2 ** attempt)))
+                logger.warning("arXiv rate limited (429). Waiting %ds before retry %d/%d",
+                               retry_after, attempt + 1, max_retries)
+                _time.sleep(retry_after)
+                continue
+            resp.raise_for_status()
+            break
+        except httpx.HTTPError as e:
+            last_exc = e
+            if attempt < max_retries - 1:
+                wait = base_delay * (2 ** attempt)
+                logger.warning("arXiv request failed (%s). Retrying in %ds (%d/%d)",
+                               e, wait, attempt + 1, max_retries)
+                _time.sleep(wait)
+            else:
+                logger.error("arXiv API request failed after %d retries: %s", max_retries, e)
+        finally:
+            pass  # close handled below
+
+    if should_close:
+        client.close()
+
+    if resp is None or not resp.is_success:
+        logger.error("arXiv API unavailable after retries (last error: %s)", last_exc)
         return []
-    finally:
-        if should_close:
-            client.close()
 
     feed = feedparser.parse(resp.text)
     papers: List[Paper] = []
